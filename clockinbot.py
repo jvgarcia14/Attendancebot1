@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 EXPECTED_PAGES = {
     "brittanyafree": "Brittanya Free",
     "brittanyapaid": "Brittanya Paid",
-    "brownin free": "browin paid",
+    "browninfree": "browinpaid",
     "fansly": "Fansly",
     "kissingcousins": "Kissing Cousins",
     "valerievip": "Valerie VIP",
@@ -112,3 +112,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
