@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 EXPECTED_PAGES = {
     "brittanyafree": "Brittanya Free",
     "brittanyapaid": "Brittanya Paid",
+    "brownin free": "browin paid",
     "fansly": "Fansly",
     "kissingcousins": "Kissing Cousins",
     "valerievip": "Valerie VIP",
@@ -109,4 +110,5 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
+
     main()
