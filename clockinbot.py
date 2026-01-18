@@ -125,7 +125,7 @@ async def clockins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- MAIN ----------------
 def main():
-    TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
+    TOKEN = "8536358814:AAHyg5UeZyCNw14T1T8F5cjQVb9znYgVte0"
 
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -137,3 +137,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
