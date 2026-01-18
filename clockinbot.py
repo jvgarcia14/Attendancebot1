@@ -30,9 +30,9 @@ def normalize_tag(tag: str) -> str:
 
 # ---------------- SHIFT TAGS ----------------
 SHIFT_TAGS = {
-    "clockinmorning": "morning",
+    "clockinprime": "prime",
     "clockinmidshift": "midshift",
-    "clockingraveyard": "graveyard",
+    "clockinclosing": "closing",
 }
 
 # ---------------- PAGES ----------------
@@ -113,9 +113,9 @@ EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
 # ---------------- STORAGE ----------------
 clock_ins = {
-    "morning": {},
+    "prime": {},
     "midshift": {},
-    "graveyard": {},
+    "closing": {},
 }
 
 # ---------------- PARSER ----------------
@@ -153,7 +153,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text_lower = update.message.text.lower()
-
     if not any(tag in text_lower for tag in SHIFT_TAGS):
         return
 
@@ -179,8 +178,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- STATUS GENERATOR ----------------
 def generate_shift_status(shift: str, with_names=False) -> str:
-    clocked = []
-    missing = []
+    clocked, missing = [], []
 
     for key, label in EXPECTED_PAGES.items():
         if key in clock_ins[shift]:
@@ -205,62 +203,62 @@ def generate_shift_status(shift: str, with_names=False) -> str:
     return msg
 
 # ---------------- COMMANDS ----------------
-async def morning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("morning"), parse_mode="Markdown")
+async def prime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("prime"), parse_mode="Markdown")
 
 async def midshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("midshift"), parse_mode="Markdown")
 
-async def graveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("graveyard"), parse_mode="Markdown")
+async def closing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("closing"), parse_mode="Markdown")
 
-async def namemorning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("morning", True), parse_mode="Markdown")
+async def nameprime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("prime", True), parse_mode="Markdown")
 
 async def namemidshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("midshift", True), parse_mode="Markdown")
 
-async def namegraveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("graveyard", True), parse_mode="Markdown")
+async def nameclosing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("closing", True), parse_mode="Markdown")
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for shift in clock_ins:
         clock_ins[shift].clear()
     await update.message.reply_text("♻️ *All clock-ins have been reset.*", parse_mode="Markdown")
 
-async def resetmorning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    clock_ins["morning"].clear()
-    await update.message.reply_text("♻️ *Morning shift reset.*", parse_mode="Markdown")
+async def resetprime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["prime"].clear()
+    await update.message.reply_text("♻️ *Prime shift reset.*", parse_mode="Markdown")
 
 async def resetmidshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clock_ins["midshift"].clear()
     await update.message.reply_text("♻️ *Midshift reset.*", parse_mode="Markdown")
 
-async def resetgraveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    clock_ins["graveyard"].clear()
-    await update.message.reply_text("♻️ *Graveyard shift reset.*", parse_mode="Markdown")
+async def resetclosing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["closing"].clear()
+    await update.message.reply_text("♻️ *Closing shift reset.*", parse_mode="Markdown")
 
 # ---------------- MAIN ----------------
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("morning", morning_command))
+    app.add_handler(CommandHandler("prime", prime_command))
     app.add_handler(CommandHandler("midshift", midshift_command))
-    app.add_handler(CommandHandler("graveyard", graveyard_command))
+    app.add_handler(CommandHandler("closing", closing_command))
 
-    app.add_handler(CommandHandler("namemorning", namemorning_command))
+    app.add_handler(CommandHandler("nameprime", nameprime_command))
     app.add_handler(CommandHandler("namemidshift", namemidshift_command))
-    app.add_handler(CommandHandler("namegraveyard", namegraveyard_command))
+    app.add_handler(CommandHandler("nameclosing", nameclosing_command))
 
     app.add_handler(CommandHandler("reset", reset_command))
-    app.add_handler(CommandHandler("resetmorning", resetmorning_command))
+    app.add_handler(CommandHandler("resetprime", resetprime_command))
     app.add_handler(CommandHandler("resetmidshift", resetmidshift_command))
-    app.add_handler(CommandHandler("resetgraveyard", resetgraveyard_command))
+    app.add_handler(CommandHandler("resetclosing", resetclosing_command))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Clock-in bot running (3 shifts, names, resets, silent, no history)...")
+    print("🤖 Clock-in bot running (Prime / Midshift / Closing)...")
     app.run_polling()
 
 if __name__ == "__main__":
