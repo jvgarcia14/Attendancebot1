@@ -222,27 +222,42 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
 
 # ---------------- STATUS GENERATORS ----------------
 def generate_shift_status(shift: str, with_names=False):
-    lines = []
+    clocked = []
+    missing = []
+
     for key, label in EXPECTED_PAGES.items():
         if key in clock_ins[shift]:
             users = clock_ins[shift][key]["users"]
             covers = clock_ins[shift][key]["covers"]
+
             parts = []
             if users:
-                parts.append(f"{len(users)} chatter(s)")
+                parts.append(f"{len(users)} chatter{'s' if len(users) != 1 else ''}")
             if covers:
-                parts.append(f"{len(covers)} cover(s)")
-            header = f"{label} ({', '.join(parts)})"
+                parts.append(f"{len(covers)} cover{'s' if len(covers) != 1 else ''}")
+
+            header = f"{label} ({', '.join(parts)})" if parts else f"{label} (cover)"
+
             block = header
             if with_names:
                 for u in users:
                     block += f"\n- {u}"
                 for c in covers:
                     block += f"\n- {c} (cover)"
-            lines.append(block)
-    if not lines:
-        return f"📋 *{shift.upper()}*\n\nNo clock-ins."
-    return f"📋 *{shift.upper()}*\n\n" + "\n\n".join(lines)
+
+            clocked.append(block)
+        else:
+            missing.append(label)
+
+    msg = f"📋 *{shift.upper()} SHIFT CLOCK-IN STATUS:*\n\n"
+
+    msg += "✅ *Clocked in:*\n"
+    msg += "\n\n".join(clocked) if clocked else "None"
+
+    msg += "\n\n🚫 *No Clock In:*\n"
+    msg += "\n".join(missing) if missing else "None"
+
+    return msg
 
 def generate_late_status(shift: str):
     cutoff = SHIFT_CUTOFFS[shift]
@@ -358,3 +373,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
