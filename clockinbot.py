@@ -22,27 +22,116 @@ def normalize_tag(tag: str) -> str:
 
 # ---------------- EXPECTED PAGES ----------------
 RAW_PAGES = {
-    "brittanyafree": "Brittanya Free",
-    "brittanyapaid": "Brittanya Paid",
-    "autumnpaid": "Autumn Paid",
+    "alannafreeoftv": "Alanna Free / OFTV",
+    "alannapaid": "Alanna Paid",
+    "alannawelcome": "Alanna Welcome",
+
+    "alexis": "Alexis",
+
+    "allyfree": "Ally Free",
+    "allypaid": "Ally Paid",
+
+    "aprilb": "April B",
+    "ashley": "Ashley",
+
+    "asiadollpaidfree": "Asia Doll Paid / Free",
+
     "autumnfree": "Autumn Free",
-    "fansly": "Fansly",
-    "kissingcousins": "Kissing Cousins",
-    "valerievip": "Valerie VIP",
-    "carterpaid": "Carter Paid",
-    "carterfree": "Carter Free",
-    "charlottepfree": "Charlotte P Free",
-    "charlotteppaid": "Charlotte P Paid",
+    "autumnpaid": "Autumn Paid",
+    "autumnwelcome": "Autumn Welcome",
+
+    "brifreeoftv": "Bri Free / OFTV",
+    "bripaid": "Bri Paid",
+    "briwelcome": "Bri Welcome",
+
+    "brittanyamain": "Brittanya Main",
+    "brittanyapaidfree": "Brittanya Paid / Free",
+
+    "bronwinfree": "Bronwin Free",
+    "bronwinoftvmcarteroftv": "Bronwin OFTV & MCarter OFTV",
+    "bronwinpaid": "Bronwin Paid",
+    "bronwinwelcome": "Bronwin Welcome",
+
+    "carterpaidfree": "Carter Paid / Free",
+
+    "christipaidfree": "Christi Paid and Free",
+
+    "claire": "Claire",
+
+    "cocofree": "Coco Free",
+    "cocopaID": "Coco Paid",
+
+    "cyndiecynthiacolby": "Cyndie, Cynthia & Colby",
+
+    "dandfreeoftv": "Dan D Free / OFTV",
+    "dandpaid": "Dan D Paid",
+    "dandwelcome": "Dan D Welcome",
+
+    "emilyraypaidfree": "Emily Ray Paid / Free",
+
+    "essiepaidfree": "Essie Paid / Free",
+
     "gracefree": "Grace Free",
-    "emilyraypaid": "Emily Ray Paid",
-    "emilyrayfree": "Emily Ray Free",
+
+    "haileywfree": "Hailey W Free",
+    "haileywpaid": "Hailey W Paid",
+
+    "hazeyfree": "Hazey Free",
+    "hazeypaid": "Hazey Paid",
+    "hazeywelcome": "Hazey Welcome",
+
+    "honeynoppv": "Honey NO PPV",
+    "honeyvip": "Honey VIP",
+
+    "isabellaxizziekay": "Isabella x Izzie Kay",
+
+    "islafree": "Isla Free",
+    "islaoftv": "Isla OFTV",
+    "islapaid": "Isla Paid",
+    "islawelcome": "Isla Welcome",
+
+    "kayleexjasmyn": "Kaylee X Jasmyn",
+
+    "kissingcousinsxvalerievip": "Kissing Cousins X Valerie VIP",
+
     "lexipaid": "Lexi Paid",
-    "oaklypaid": "Oakly Paid",
-    "oaklyfree": "Oakly Free",
-    "paris": "Paris",
-    "asiadollpaid": "Asia Doll Paid",
-    "asiadollfree": "Asia Doll Free",
+
+    "lilahfree": "Lilah Free",
+    "lilahpaid": "Lilah Paid",
+
+    "livv": "Livv",
+
+    "mathildefree": "Mathilde Free",
+    "mathildewelcome": "Mathilde Welcome",
+    "mathildepaidxisaxalexalana": "Mathilde Paid x Isa A x Alexa Lana",
+
+    "michellefree": "Michelle Free",
+    "michellevip": "Michelle VIP",
+
     "mommycarter": "Mommy Carter",
+
+    "natalialfree": "Natalia L Free",
+    "natalialpaid": "Natalia L Paid",
+    "natalialnicolefansly": "Natalia L, Nicole Fansly",
+
+    "natalierfree": "Natalie R Free",
+    "natalierpaid": "Natalie R Paid",
+
+    "paris": "Paris",
+
+    "popstfree": "Pops T Free",
+    "popstpaid": "Pops T Paid",
+
+    "rubirosefree": "Rubi Rose Free",
+    "rubirosepaid": "Rubi Rose Paid",
+
+    "salah": "Salah",
+    "sarahc": "Sarah C",
+
+    "skypaidfree": "Sky Paid / Free",
+
+
+    
 }
 
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
@@ -150,3 +239,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
