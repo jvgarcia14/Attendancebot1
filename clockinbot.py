@@ -1,6 +1,7 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
+from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,7 +13,9 @@ from telegram.ext import (
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+# ---------------- TIMEZONE ----------------
+PH_TZ = ZoneInfo("Asia/Manila")
 
 # ---------------- BOT START TIME ----------------
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -28,18 +31,132 @@ def normalize_tag(tag: str) -> str:
         .replace("x", "")
     )
 
-# ---------------- SHIFT TAGS ----------------
+def to_ph_time(dt: datetime) -> datetime:
+    return dt.astimezone(PH_TZ)
+
+# ---------------- SHIFTS ----------------
 SHIFT_TAGS = {
     "clockinprime": "prime",
     "clockinmidshift": "midshift",
     "clockinclosing": "closing",
 }
 
+SHIFT_CUTOFFS = {
+    "prime": time(8, 0),
+    "midshift": time(16, 0),
+    "closing": time(0, 0),
+}
+
 # ---------------- PAGES ----------------
 RAW_PAGES = {
+    "alannafreeoftv": "Alanna Free / OFTV",
+    "alannapaid": "Alanna Paid",
+    "alannawelcome": "Alanna Welcome",
+
+    "alexis": "Alexis",
+
+    "allyfree": "Ally Free",
+    "allypaid": "Ally Paid",
+
+    "aprilb": "April B",
+    "ashley": "Ashley",
+
+    "asiadollpaidfree": "Asia Doll Paid / Free",
+
+    "autumnfree": "Autumn Free",
     "autumnpaid": "Autumn Paid",
+    "autumnwelcome": "Autumn Welcome",
+
+    "brifreeoftv": "Bri Free / OFTV",
+    "bripaid": "Bri Paid",
+    "briwelcome": "Bri Welcome",
+
+    "brittanyamain": "Brittanya Main",
+    "brittanyapaidfree": "Brittanya Paid / Free",
+
+    "bronwinfree": "Bronwin Free",
+    "bronwinoftvmcarteroftv": "Bronwin OFTV & MCarter OFTV",
+    "bronwinpaid": "Bronwin Paid",
+    "bronwinwelcome": "Bronwin Welcome",
+
+    "carterpaidfree": "Carter Paid / Free",
+
+    "christipaidfree": "Christi Paid and Free",
+
+    "claire": "Claire",
+
+    "cocofree": "Coco Free",
+    "cocopaID": "Coco Paid",
+
+    "cyndiecynthiacolby": "Cyndie, Cynthia & Colby",
+
+    "dandfreeoftv": "Dan D Free / OFTV",
+    "dandpaid": "Dan D Paid",
+    "dandwelcome": "Dan D Welcome",
+
+    "emilyraypaidfree": "Emily Ray Paid / Free",
+
+    "essiepaidfree": "Essie Paid / Free",
+
+    "gracefree": "Grace Free",
+
+    "haileywfree": "Hailey W Free",
+    "haileywpaid": "Hailey W Paid",
+
+    "hazeyfree": "Hazey Free",
+    "hazeypaid": "Hazey Paid",
+    "hazeywelcome": "Hazey Welcome",
+
+    "honeynoppv": "Honey NO PPV",
+    "honeyvip": "Honey VIP",
+
+    "isabellaxizziekay": "Isabella x Izzie Kay",
+
+    "islafree": "Isla Free",
+    "islaoftv": "Isla OFTV",
+    "islapaid": "Isla Paid",
+    "islawelcome": "Isla Welcome",
+
+    "kayleexjasmyn": "Kaylee X Jasmyn",
+
+    "kissingcousinsxvalerievip": "Kissing Cousins X Valerie VIP",
+
+    "lexipaid": "Lexi Paid",
+
+    "lilahfree": "Lilah Free",
+    "lilahpaid": "Lilah Paid",
+
+    "livv": "Livv",
+
+    "mathildefree": "Mathilde Free",
+    "mathildepaid": "Mathilde Paid",
+    "mathildewelcome": "Mathilde Welcome",
+    "mathildepaidxisaxalexalana": "Mathilde Paid x Isa A x Alexa Lana",
+
+    "michellefree": "Michelle Free",
+    "michellevip": "Michelle VIP",
+
     "mommycarter": "Mommy Carter",
-    # keep your full page list here (unchanged)
+
+    "natalialfree": "Natalia L Free",
+    "natalialpaid": "Natalia L Paid",
+    "natalialnicolefansly": "Natalia L, Nicole Fansly",
+
+    "natalierfree": "Natalie R Free",
+    "natalierpaid": "Natalie R Paid",
+
+    "paris": "Paris",
+
+    "popstfree": "Pops T Free",
+    "popstpaid": "Pops T Paid",
+
+    "rubirosefree": "Rubi Rose Free",
+    "rubirosepaid": "Rubi Rose Paid",
+
+    "salah": "Salah",
+    "sarahc": "Sarah C",
+
+    "skypaidfree": "Sky Paid / Free",
 }
 
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
@@ -51,24 +168,20 @@ clock_ins = {
     "closing": {},
 }
 
-# ---------------- INIT PAGE ----------------
-def init_page(shift, page_key, date, time):
+def init_page(shift, page_key):
     if page_key not in clock_ins[shift]:
         clock_ins[shift][page_key] = {
-            "users": set(),
-            "covers": set(),
-            "date": date,
-            "time": time,
+            "users": {},   # name -> datetime
+            "covers": {},  # name -> datetime
         }
 
 # ---------------- PARSER ----------------
 def parse_clock_in(text: str):
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     if not any(l.upper() == "CLOCK IN" for l in lines):
-        return False, "", "", "", ""
+        return False, "", ""
 
     page_key, shift = "", ""
-
     for l in lines:
         if l.startswith("#"):
             tag = normalize_tag(l[1:])
@@ -78,13 +191,10 @@ def parse_clock_in(text: str):
                 page_key = tag
 
     if not page_key or not shift:
-        return False, "", "", "", ""
+        return False, "", ""
+    return True, page_key, shift
 
-    date = lines[1] if len(lines) > 1 else ""
-    time = lines[2] if len(lines) > 2 else ""
-    return True, date, time, page_key, shift
-
-# ---------------- MESSAGE HANDLER ----------------
+# ---------------- NORMAL CLOCK-IN ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -95,41 +205,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not any(tag in text for tag in SHIFT_TAGS):
         return
 
-    valid, date, time, page_key, shift = parse_clock_in(update.message.text)
+    valid, page_key, shift = parse_clock_in(update.message.text)
     if not valid or page_key not in EXPECTED_PAGES:
         return
 
     user = update.message.from_user.full_name
-    init_page(shift, page_key, date, time)
-    clock_ins[shift][page_key]["users"].add(user)
+    ph_time = to_ph_time(update.message.date)
+
+    init_page(shift, page_key)
+    clock_ins[shift][page_key]["users"][user] = ph_time
 
     await update.message.reply_text(
-        f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\nby {user}",
+        f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\n"
+        f"{ph_time.strftime('%I:%M %p')} PH\nby {user}",
         parse_mode="Markdown",
     )
 
-# ---------------- COVER HANDLER ----------------
+# ---------------- COVER CLOCK-IN ----------------
 async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shift: str):
     if update.message.date < BOT_START_TIME:
         return
-
     if not context.args:
-        return  # silent
+        return
 
     page_key = normalize_tag(context.args[0])
     if page_key not in EXPECTED_PAGES:
         return
 
     user = update.message.from_user.full_name
-    init_page(shift, page_key, "", "")
-    clock_ins[shift][page_key]["covers"].add(user)
+    ph_time = to_ph_time(update.message.date)
+
+    init_page(shift, page_key)
+    clock_ins[shift][page_key]["covers"][user] = ph_time
 
     await update.message.reply_text(
-        f"🟡 *{EXPECTED_PAGES[page_key]}* COVER clock-in ({shift})\nby {user}",
+        f"🟡 *{EXPECTED_PAGES[page_key]}* COVER ({shift})\n"
+        f"{ph_time.strftime('%I:%M %p')} PH\nby {user}",
         parse_mode="Markdown",
     )
 
-# ---------------- STATUS GENERATOR ----------------
+# ---------------- STATUS ----------------
 def generate_shift_status(shift: str, with_names=False) -> str:
     clocked, missing = [], []
 
@@ -144,13 +259,11 @@ def generate_shift_status(shift: str, with_names=False) -> str:
             if covers:
                 parts.append(f"{len(covers)} cover{'s' if len(covers) > 1 else ''}")
 
-            header = f"{label} ({', '.join(parts)})" if parts else f"{label} (cover)"
-            block = header
-
+            block = f"{label} ({', '.join(parts)})"
             if with_names:
-                for u in sorted(users):
+                for u in users:
                     block += f"\n- {u}"
-                for c in sorted(covers):
+                for c in covers:
                     block += f"\n- {c} (cover)"
 
             clocked.append(block)
@@ -164,30 +277,61 @@ def generate_shift_status(shift: str, with_names=False) -> str:
     msg += "\n".join(missing) if missing else "None"
     return msg
 
-# ---------------- VIEW COMMANDS ----------------
-async def prime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------------- LATE STATUS ----------------
+def generate_late_status(shift: str) -> str:
+    cutoff = SHIFT_CUTOFFS[shift]
+    late_blocks = []
+
+    for key, label in EXPECTED_PAGES.items():
+        if key not in clock_ins[shift]:
+            continue
+
+        users = clock_ins[shift][key]["users"]
+        covers = clock_ins[shift][key]["covers"]
+
+        late = []
+        for u, t in users.items():
+            if t.time() > cutoff:
+                late.append(f"- {u} ({t.strftime('%I:%M %p')})")
+        for c, t in covers.items():
+            if t.time() > cutoff:
+                late.append(f"- {c} (cover, {t.strftime('%I:%M %p')})")
+
+        if late:
+            late_blocks.append(f"*{label}*\n" + "\n".join(late))
+
+    if not late_blocks:
+        return f"⏰ *{shift.upper()} LATE CLOCK-INS:*\n\nNo late clock-ins 🎉"
+
+    return f"⏰ *{shift.upper()} LATE CLOCK-INS:*\n\n" + "\n\n".join(late_blocks)
+
+# ---------------- COMMANDS ----------------
+async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("prime"), parse_mode="Markdown")
 
-async def midshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("midshift"), parse_mode="Markdown")
 
-async def closing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("closing"), parse_mode="Markdown")
 
-async def nameprime_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def nameprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("prime", True), parse_mode="Markdown")
 
-async def namemidshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def namemidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("midshift", True), parse_mode="Markdown")
 
-async def nameclosing_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def nameclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("closing", True), parse_mode="Markdown")
 
-# ---------------- RESET ----------------
-async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for s in clock_ins:
-        clock_ins[s].clear()
-    await update.message.reply_text("♻️ *All clock-ins reset.*", parse_mode="Markdown")
+async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
+
+async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_late_status("midshift"), parse_mode="Markdown")
+
+async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
 
 # ---------------- MAIN ----------------
 def main():
@@ -195,25 +339,29 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     # Views
-    app.add_handler(CommandHandler("prime", prime_command))
-    app.add_handler(CommandHandler("midshift", midshift_command))
-    app.add_handler(CommandHandler("closing", closing_command))
-    app.add_handler(CommandHandler("nameprime", nameprime_command))
-    app.add_handler(CommandHandler("namemidshift", namemidshift_command))
-    app.add_handler(CommandHandler("nameclosing", nameclosing_command))
+    app.add_handler(CommandHandler("prime", prime))
+    app.add_handler(CommandHandler("midshift", midshift))
+    app.add_handler(CommandHandler("closing", closing))
 
-    # Cover clock-ins
+    # Names
+    app.add_handler(CommandHandler("nameprime", nameprime))
+    app.add_handler(CommandHandler("namemidshift", namemidshift))
+    app.add_handler(CommandHandler("nameclosing", nameclosing))
+
+    # Late
+    app.add_handler(CommandHandler("primelate", primelate))
+    app.add_handler(CommandHandler("midshiftlate", midshiftlate))
+    app.add_handler(CommandHandler("closinglate", closinglate))
+
+    # Covers
     app.add_handler(CommandHandler("clockinprimecover", lambda u, c: cover_clockin(u, c, "prime")))
     app.add_handler(CommandHandler("clockinmidshiftcover", lambda u, c: cover_clockin(u, c, "midshift")))
     app.add_handler(CommandHandler("clockinclosingcover", lambda u, c: cover_clockin(u, c, "closing")))
 
-    # Reset
-    app.add_handler(CommandHandler("reset", reset_command))
-
-    # Normal clock-in
+    # Clock-in messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Clock-in bot running (Prime / Midshift / Closing + Cover)...")
+    print("🤖 Clock-in bot running (Prime / Midshift / Closing + Late)")
     app.run_polling()
 
 if __name__ == "__main__":
