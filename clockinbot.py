@@ -164,7 +164,7 @@ def parse_clock_in(text: str):
         return False, "", ""
     return True, page_key, shift
 
-# ---------------- CLOCK-IN HANDLER ----------------
+# ---------------- CLOCK-IN MESSAGE ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -183,7 +183,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         suggestion = suggest_page(page_key)
         if suggestion:
             await update.message.reply_text(
-                f"❗ Page not recognized.\n\nDid you mean:\n#{suggestion}"
+                f"❗ Page not recognized.\nDid you mean: #{suggestion}"
             )
         return
 
@@ -220,35 +220,72 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
         parse_mode="Markdown",
     )
 
-# ---------------- STATUS / LATE / SEARCH ----------------
-def generate_late_status(shift: str) -> str:
+# ---------------- STATUS GENERATORS ----------------
+def generate_shift_status(shift: str, with_names=False):
+    lines = []
+    for key, label in EXPECTED_PAGES.items():
+        if key in clock_ins[shift]:
+            users = clock_ins[shift][key]["users"]
+            covers = clock_ins[shift][key]["covers"]
+            parts = []
+            if users:
+                parts.append(f"{len(users)} chatter(s)")
+            if covers:
+                parts.append(f"{len(covers)} cover(s)")
+            header = f"{label} ({', '.join(parts)})"
+            block = header
+            if with_names:
+                for u in users:
+                    block += f"\n- {u}"
+                for c in covers:
+                    block += f"\n- {c} (cover)"
+            lines.append(block)
+    if not lines:
+        return f"📋 *{shift.upper()}*\n\nNo clock-ins."
+    return f"📋 *{shift.upper()}*\n\n" + "\n\n".join(lines)
+
+def generate_late_status(shift: str):
     cutoff = SHIFT_CUTOFFS[shift]
-    late_blocks = []
+    blocks = []
 
     for key, label in EXPECTED_PAGES.items():
         if key not in clock_ins[shift]:
             continue
 
-        users = clock_ins[shift][key]["users"]
-        covers = clock_ins[shift][key]["covers"]
-
         late = []
-        for u, t in users.items():
+        for u, t in clock_ins[shift][key]["users"].items():
             if t.time() > cutoff:
                 late.append(f"- {u} ({t.strftime('%I:%M %p')})")
-        for c, t in covers.items():
+        for c, t in clock_ins[shift][key]["covers"].items():
             if t.time() > cutoff:
                 late.append(f"- {c} (cover, {t.strftime('%I:%M %p')})")
 
         if late:
-            late_blocks.append(f"*{label}*\n" + "\n".join(late))
+            blocks.append(f"*{label}*\n" + "\n".join(late))
 
-    if not late_blocks:
-        return f"⏰ *{shift.upper()} LATE CLOCK-INS:*\n\nNo late clock-ins 🎉"
-
-    return f"⏰ *{shift.upper()} LATE CLOCK-INS:*\n\n" + "\n\n".join(late_blocks)
+    if not blocks:
+        return f"⏰ *{shift.upper()} LATE*\n\nNo late clock-ins 🎉"
+    return f"⏰ *{shift.upper()} LATE*\n\n" + "\n\n".join(blocks)
 
 # ---------------- COMMANDS ----------------
+async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("prime"), parse_mode="Markdown")
+
+async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("midshift"), parse_mode="Markdown")
+
+async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("closing"), parse_mode="Markdown")
+
+async def nameprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("prime", True), parse_mode="Markdown")
+
+async def namemidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("midshift", True), parse_mode="Markdown")
+
+async def nameclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("closing", True), parse_mode="Markdown")
+
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
 
@@ -258,25 +295,65 @@ async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
 
+async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        generate_late_status("prime") + "\n\n" +
+        generate_late_status("midshift") + "\n\n" +
+        generate_late_status("closing")
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for s in clock_ins:
+        clock_ins[s].clear()
+    await update.message.reply_text("♻️ All shifts reset.")
+
+async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["prime"].clear()
+    await update.message.reply_text("♻️ Prime reset.")
+
+async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["midshift"].clear()
+    await update.message.reply_text("♻️ Midshift reset.")
+
+async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["closing"].clear()
+    await update.message.reply_text("♻️ Closing reset.")
+
+async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reset(update, context)
+
 # ---------------- MAIN ----------------
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Late
+    app.add_handler(CommandHandler("prime", prime))
+    app.add_handler(CommandHandler("midshift", midshift))
+    app.add_handler(CommandHandler("closing", closing))
+
+    app.add_handler(CommandHandler("nameprime", nameprime))
+    app.add_handler(CommandHandler("namemidshift", namemidshift))
+    app.add_handler(CommandHandler("nameclosing", nameclosing))
+
     app.add_handler(CommandHandler("primelate", primelate))
     app.add_handler(CommandHandler("midshiftlate", midshiftlate))
     app.add_handler(CommandHandler("closinglate", closinglate))
+    app.add_handler(CommandHandler("late", late))
 
-    # Covers
+    app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(CommandHandler("resetprime", resetprime))
+    app.add_handler(CommandHandler("resetmidshift", resetmidshift))
+    app.add_handler(CommandHandler("resetclosing", resetclosing))
+    app.add_handler(CommandHandler("rest", rest))
+
     app.add_handler(CommandHandler("clockinprimecover", lambda u, c: cover_clockin(u, c, "prime")))
     app.add_handler(CommandHandler("clockinmidshiftcover", lambda u, c: cover_clockin(u, c, "midshift")))
     app.add_handler(CommandHandler("clockinclosingcover", lambda u, c: cover_clockin(u, c, "closing")))
 
-    # Clock-in
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Clock-in bot running (FULL VERSION)")
+    print("🤖 Attendance bot running (FINAL FIXED VERSION)")
     app.run_polling()
 
 if __name__ == "__main__":
