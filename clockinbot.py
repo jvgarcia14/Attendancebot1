@@ -21,8 +21,8 @@ BOT_START_TIME = datetime.now(timezone.utc)
 def normalize_tag(tag: str) -> str:
     return (
         tag.lower()
-        .replace("_", "")
         .replace(" ", "")
+        .replace("_", "")
         .replace("/", "")
         .replace("&", "")
         .replace("x", "")
@@ -35,7 +35,7 @@ SHIFT_TAGS = {
     "clockingraveyard": "graveyard",
 }
 
-# ---------------- EXPECTED PAGES ----------------
+# ---------------- PAGES ----------------
 RAW_PAGES = {
     "alannafreeoftv": "Alanna Free / OFTV",
     "alannapaid": "Alanna Paid",
@@ -111,7 +111,7 @@ RAW_PAGES = {
 
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
-# ---------------- STORAGE (PER SHIFT) ----------------
+# ---------------- STORAGE ----------------
 clock_ins = {
     "morning": {},
     "midshift": {},
@@ -149,20 +149,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    # Ignore history
     if update.message.date < BOT_START_TIME:
         return
 
     text_lower = update.message.text.lower()
 
-    # Only react to shift hashtags
     if not any(tag in text_lower for tag in SHIFT_TAGS):
         return
 
     valid, date, time, page_key, shift = parse_clock_in(update.message.text)
-
     if not valid or page_key not in EXPECTED_PAGES:
-        return  # silent fail
+        return
 
     user = update.message.from_user.full_name
 
@@ -176,8 +173,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clock_ins[shift][page_key]["users"].add(user)
 
     await update.message.reply_text(
-        f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\n"
-        f"{date}\n{time}\nby {user}",
+        f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\n{date}\n{time}\nby {user}",
         parse_mode="Markdown",
     )
 
@@ -203,7 +199,6 @@ def generate_shift_status(shift: str, with_names=False) -> str:
     msg = f"📋 *{shift.upper()} SHIFT CLOCK IN STATUS:*\n\n"
     msg += "✅ *Clocked in:*\n"
     msg += "\n\n".join(clocked) if clocked else "None"
-
     msg += "\n\n🚫 *No Clock In:*\n"
     msg += "\n".join(missing) if missing else "None"
 
@@ -219,13 +214,31 @@ async def midshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def graveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_status("graveyard"), parse_mode="Markdown")
 
-async def names_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = (
-        generate_shift_status("morning", True) + "\n\n" +
-        generate_shift_status("midshift", True) + "\n\n" +
-        generate_shift_status("graveyard", True)
-    )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+async def namemorning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("morning", True), parse_mode="Markdown")
+
+async def namemidshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("midshift", True), parse_mode="Markdown")
+
+async def namegraveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_status("graveyard", True), parse_mode="Markdown")
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for shift in clock_ins:
+        clock_ins[shift].clear()
+    await update.message.reply_text("♻️ *All clock-ins have been reset.*", parse_mode="Markdown")
+
+async def resetmorning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["morning"].clear()
+    await update.message.reply_text("♻️ *Morning shift reset.*", parse_mode="Markdown")
+
+async def resetmidshift_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["midshift"].clear()
+    await update.message.reply_text("♻️ *Midshift reset.*", parse_mode="Markdown")
+
+async def resetgraveyard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    clock_ins["graveyard"].clear()
+    await update.message.reply_text("♻️ *Graveyard shift reset.*", parse_mode="Markdown")
 
 # ---------------- MAIN ----------------
 def main():
@@ -235,10 +248,19 @@ def main():
     app.add_handler(CommandHandler("morning", morning_command))
     app.add_handler(CommandHandler("midshift", midshift_command))
     app.add_handler(CommandHandler("graveyard", graveyard_command))
-    app.add_handler(CommandHandler("names", names_command))
+
+    app.add_handler(CommandHandler("namemorning", namemorning_command))
+    app.add_handler(CommandHandler("namemidshift", namemidshift_command))
+    app.add_handler(CommandHandler("namegraveyard", namegraveyard_command))
+
+    app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CommandHandler("resetmorning", resetmorning_command))
+    app.add_handler(CommandHandler("resetmidshift", resetmidshift_command))
+    app.add_handler(CommandHandler("resetgraveyard", resetgraveyard_command))
+
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Clock-in bot running (3 shifts, silent, no history)...")
+    print("🤖 Clock-in bot running (3 shifts, names, resets, silent, no history)...")
     app.run_polling()
 
 if __name__ == "__main__":
