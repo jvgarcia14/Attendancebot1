@@ -6,13 +6,17 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Page tracking list (updated with normalized keys)
-EXPECTED_PAGES = {
+# Normalize helper
+def normalize_tag(tag: str) -> str:
+    return tag.lower().replace("_", "").replace(" ", "")
+
+# Expected pages (AUTO-normalized)
+RAW_PAGES = {
     "brittanyafree": "Brittanya Free",
     "brittanyapaid": "Brittanya Paid",
-    "autumnpaid": "Autumn Free",
-    "autumnfree": "Autumn Paid",
-    "browninfree": "browinpaid",
+    "autumnpaid": "Autumn Paid",
+    "autumnfree": "Autumn Free",
+    "browninfree": "Brownin Free",
     "fansly": "Fansly",
     "kissingcousins": "Kissing Cousins",
     "valerievip": "Valerie VIP",
@@ -29,42 +33,58 @@ EXPECTED_PAGES = {
     "oaklyfree": "Oakly Free",
     "paris": "Paris",
     "asiadollpaid": "Asia Doll Paid",
-    "asiadollfree": "Asia Doll Free"
+    "asiadollfree": "Asia Doll Free",
 }
 
-# Clock-in data storage
+EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
+
+# Storage
 clock_ins = {}
 
-# Normalize the tag to match expected keys
-def normalize_tag(tag: str) -> str:
-    return tag.lower().replace("_", "").replace(" ", "")
+# Validate message
+def validate_clock_in_format(text: str):
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
 
-# Validate clock-in message format
-def validate_clock_in_format(text: str) -> tuple[bool, str, str, str]:
-    lines = text.strip().split('\n')
-    if len(lines) != 4 or lines[0].strip().upper() != "CLOCK IN":
+    if len(lines) < 4:
         return False, "", "", ""
-    date = lines[1].strip()
-    time = lines[2].strip()
-    hashtag = lines[3].strip()
-    if not hashtag.startswith('#'):
+
+    if lines[0].upper() != "CLOCK IN":
         return False, "", "", ""
+
+    date = lines[1]
+    time = lines[2]
+    hashtag = lines[3]
+
+    if not hashtag.startswith("#"):
+        return False, "", "", ""
+
     page_key = normalize_tag(hashtag[1:])
     return True, date, time, page_key
 
-# Handle clock-in message
+# Handle messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
     text = update.message.text
     user = update.message.from_user.first_name
+
     valid, date, time, page_key = validate_clock_in_format(text)
 
-    if not valid or page_key not in EXPECTED_PAGES:
+    if not valid:
         await update.message.reply_text(
-            "❌ Invalid CLOCK IN format or unknown page.\n\nUse format:\n\n"
+            "❌ Invalid CLOCK IN format.\n\n"
+            "Use:\n"
             "CLOCK IN\n"
-            "<Month Day, Year> PST\n"
-            "<Start Time> - <End Time> PST\n"
+            "December 5, 2025 PST\n"
+            "8:00 AM - 4:00 PM PST\n"
             "#page_name"
+        )
+        return
+
+    if page_key not in EXPECTED_PAGES:
+        await update.message.reply_text(
+            f"❌ Unknown page: #{page_key}"
         )
         return
 
@@ -73,47 +93,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "date": date,
         "time": time
     }
+
     await update.message.reply_text(
-        f"✅ Clock-in recorded for *{EXPECTED_PAGES[page_key]}* on {date} ({time}) by {user}."
+        f"✅ Clock-in recorded for *{EXPECTED_PAGES[page_key]}*\n"
+        f"📅 {date}\n"
+        f"⏰ {time}\n"
+        f"👤 {user}",
+        parse_mode="Markdown"
     )
 
-# Format clock-in status message
-def generate_clockin_status_output() -> str:
-    clocked_in = []
+# Status output
+def generate_clockin_status_output():
+    clocked = []
     missing = []
 
     for key, label in EXPECTED_PAGES.items():
         if key in clock_ins:
-            clocked_in.append(label)
+            clocked.append(f"✅ {label}")
         else:
-            missing.append(label)
+            missing.append(f"⛔ {label}")
 
-    status_msg = "📋 CLOCK IN STATUS:\n"
-    if clocked_in:
-        status_msg += "✅ Clocked in:\n" + "\n".join(clocked_in) + "\n\n"
-    if missing:
-        status_msg += "⛔ No Clock In:\n" + "\n".join(missing)
-    return status_msg.strip()
+    return (
+        "📋 *CLOCK IN STATUS*\n\n"
+        + "\n".join(clocked)
+        + "\n\n"
+        + "\n".join(missing)
+    )
 
-# Handle /clockins command
+# /clockins command
 async def clockins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    output = generate_clockin_status_output()
-    await update.message.reply_text(output)
+    await update.message.reply_text(
+        generate_clockin_status_output(),
+        parse_mode="Markdown"
+    )
 
-# Main bot launcher
+# Main
 def main():
-    TOKEN = "8536358814:AAHyg5UeZyCNw14T1T8F5cjQVb9znYgVte0"  # Replace this with your actual bot token
+    TOKEN = "8536358814:AAHyg5UeZyCNw14T1T8F5cjQVb9znYgVte0"
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler("clockins", clockins_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Bot is running...")
+    print("🤖 Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":
-
     main()
-
-
-
