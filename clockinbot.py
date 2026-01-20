@@ -30,7 +30,7 @@ RESET_TIME_PH = time(6, 0)  # 6:00 AM PH
 # ---------------- TABLE CHUNKING ----------------
 # Increase this if you want fewer messages; decrease if Telegram complains.
 # 20-25 is usually safe for wide monospace tables.
-ROWS_PER_MESSAGE = 22
+ROWS_PER_MESSAGE = 30
 
 # ---------------- OPTIONAL DB (POSTGRES) ----------------
 DB_ENABLED = False
@@ -588,3 +588,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
