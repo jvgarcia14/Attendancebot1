@@ -35,6 +35,7 @@ try:
 except Exception:
     psycopg2 = None
 
+
 # ---------------- HELPERS ----------------
 def normalize_tag(tag: str) -> str:
     return (
@@ -46,11 +47,14 @@ def normalize_tag(tag: str) -> str:
         .replace("x", "")
     )
 
+
 def to_ph_time(dt: datetime) -> datetime:
     return dt.astimezone(PH_TZ)
 
+
 def ph_now() -> datetime:
     return datetime.now(timezone.utc).astimezone(PH_TZ)
+
 
 def attendance_day_for(ph_dt: datetime) -> date:
     """
@@ -61,9 +65,11 @@ def attendance_day_for(ph_dt: datetime) -> date:
         return ph_dt.date() - timedelta(days=1)
     return ph_dt.date()
 
+
 def suggest_page(input_key: str):
     matches = difflib.get_close_matches(input_key, EXPECTED_PAGES.keys(), n=1, cutoff=0.7)
     return matches[0] if matches else None
+
 
 # ---------------- SHIFTS ----------------
 SHIFT_TAGS = {
@@ -168,13 +174,16 @@ clock_ins = {
 
 ACTIVE_DAY: date = attendance_day_for(ph_now())
 
+
 def init_page(shift, page_key):
     if page_key not in clock_ins[shift]:
         clock_ins[shift][page_key] = {"users": {}, "covers": {}}
 
+
 def clear_all_shifts():
     for s in clock_ins:
         clock_ins[s].clear()
+
 
 # ---------------- DB SETUP ----------------
 def db_init():
@@ -209,6 +218,7 @@ def db_init():
         """
         )
 
+
 def db_upsert(att_day: date, shift: str, page_key: str, user_name: str, is_cover: bool, ph_ts: datetime):
     if not DB_ENABLED:
         return
@@ -222,6 +232,7 @@ def db_upsert(att_day: date, shift: str, page_key: str, user_name: str, is_cover
         """,
             (att_day, shift, page_key, user_name, is_cover, ph_ts),
         )
+
 
 def db_delete_day(att_day: date, shift: Optional[str] = None):
     if not DB_ENABLED:
@@ -238,11 +249,9 @@ def db_delete_day(att_day: date, shift: Optional[str] = None):
                 (att_day,),
             )
 
+
 def db_load_day(att_day: date):
-    """
-    Load today's clock-ins from DB back into memory
-    so redeploy/edit won't wipe state.
-    """
+    """Load today's clock-ins from DB back into memory so redeploy won't wipe state."""
     if not DB_ENABLED:
         return
 
@@ -272,6 +281,7 @@ def db_load_day(att_day: date):
         else:
             clock_ins[shift][page_key]["users"][user_name] = ph_dt
 
+
 # ---------------- PARSER ----------------
 def parse_clock_in(text: str):
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -291,8 +301,12 @@ def parse_clock_in(text: str):
         return False, "", ""
     return True, page_key, shift
 
-# ---------------- TABLE VIEW (VISUAL FIRST) ----------------
-def generate_shift_table(shift: str, limit=12):
+
+# ---------------- TABLE VIEW (WITH #TAG FOR MISSING) ----------------
+def generate_shift_table(shift: str, limit=12, missing_only=False):
+    """
+    Table shows #tag column. For missing pages, #tag helps coaches copy/paste.
+    """
     rows = []
     for key, label in EXPECTED_PAGES.items():
         users = clock_ins[shift].get(key, {}).get("users", {})
@@ -300,29 +314,47 @@ def generate_shift_table(shift: str, limit=12):
 
         u = len(users)
         c = len(covers)
-        status = "✅" if u or c else "❌"
-        rows.append((label, u, c, status))
+        missing = (u == 0 and c == 0)
+
+        if missing_only and not missing:
+            continue
+
+        # show ✅/❌
+        status = "✅" if not missing else "❌"
+        tag = f"#{key}"
+
+        rows.append((tag, label, u, c, status))
 
     total = len(rows)
     shown = rows[:limit]
 
+    title = f"{shift.upper()} SHIFT — MISSING PAGES" if missing_only else f"{shift.upper()} SHIFT — CLOCK-IN STATUS"
+
     msg = (
-        f"📊 *{shift.upper()} SHIFT — CLOCK-IN STATUS*\n\n"
+        f"📊 *{title}*\n\n"
         "```\n"
-        "Page                     | 👥 | 🟡 | Status\n"
-        "-------------------------+----+----+--------\n"
+        "Tag              | Page                     | 👥 | 🟡 | St\n"
+        "-----------------+--------------------------+----+----+---\n"
     )
 
-    for label, u, c, s in shown:
-        page = label[:25]
-        msg += f"{page:<25} | {u:^2} | {c:^2} |  {s}\n"
+    for tag, label, u, c, s in shown:
+        tag_col = tag[:15]
+        page_col = label[:24]
+        msg += f"{tag_col:<15} | {page_col:<24} | {u:^2} | {c:^2} | {s}\n"
 
     msg += "```\n"
 
     if total > limit:
         msg += f"_Showing {limit} of {total} pages_"
+    elif total == 0:
+        msg += "_None_"
 
     return msg
+
+
+def generate_shift_table_full(shift: str, missing_only=False):
+    return generate_shift_table(shift, limit=999, missing_only=missing_only)
+
 
 # ---------------- CLOCK-IN MESSAGE ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -366,6 +398,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
+
 # ---------------- COVER CLOCK-IN ----------------
 async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shift: str):
     global ACTIVE_DAY
@@ -396,6 +429,7 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
         parse_mode="Markdown",
     )
 
+
 # ---------------- LATE STATUS ----------------
 def generate_late_status(shift: str):
     cutoff = SHIFT_CUTOFFS[shift]
@@ -420,24 +454,57 @@ def generate_late_status(shift: str):
         return f"⏰ *{shift.upper()} LATE*\n\nNo late clock-ins 🎉"
     return f"⏰ *{shift.upper()} LATE*\n\n" + "\n\n".join(blocks)
 
+
 # ---------------- COMMANDS ----------------
 async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("prime"), parse_mode="Markdown")
 
+
 async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("midshift"), parse_mode="Markdown")
+
 
 async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("closing"), parse_mode="Markdown")
 
+
+# FULL LIST
+async def primefull(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("prime"), parse_mode="Markdown")
+
+
+async def midshiftfull(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("midshift"), parse_mode="Markdown")
+
+
+async def closingfull(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("closing"), parse_mode="Markdown")
+
+
+# MISSING ONLY (WITH #TAG)
+async def primemissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("prime", missing_only=True), parse_mode="Markdown")
+
+
+async def midshiftmissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("midshift", missing_only=True), parse_mode="Markdown")
+
+
+async def closingmissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(generate_shift_table_full("closing", missing_only=True), parse_mode="Markdown")
+
+
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
+
 
 async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("midshift"), parse_mode="Markdown")
 
+
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
+
 
 async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
@@ -449,11 +516,13 @@ async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clear_all_shifts()
     db_delete_day(ACTIVE_DAY)
     await update.message.reply_text("♻️ All shifts reset.")
+
 
 async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -461,11 +530,13 @@ async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "prime")
     await update.message.reply_text("♻️ Prime reset.")
 
+
 async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["midshift"].clear()
     db_delete_day(ACTIVE_DAY, "midshift")
     await update.message.reply_text("♻️ Midshift reset.")
+
 
 async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -473,11 +544,14 @@ async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "closing")
     await update.message.reply_text("♻️ Closing reset.")
 
+
 async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reset(update, context)
 
+
 # ---------------- AUTO RESET (SAFE ON ANY PTB) ----------------
 _last_reset_day = None
+
 
 async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
     """
@@ -497,6 +571,7 @@ async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
             db_load_day(ACTIVE_DAY)
             logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
 
+
 # ---------------- MAIN ----------------
 def main():
     global ACTIVE_DAY
@@ -512,28 +587,43 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # status tables
     app.add_handler(CommandHandler("prime", prime))
     app.add_handler(CommandHandler("midshift", midshift))
     app.add_handler(CommandHandler("closing", closing))
 
+    # full tables
+    app.add_handler(CommandHandler("primefull", primefull))
+    app.add_handler(CommandHandler("midshiftfull", midshiftfull))
+    app.add_handler(CommandHandler("closingfull", closingfull))
+
+    # missing-only (with #tag)
+    app.add_handler(CommandHandler("primemissing", primemissing))
+    app.add_handler(CommandHandler("midshiftmissing", midshiftmissing))
+    app.add_handler(CommandHandler("closingmissing", closingmissing))
+
+    # late
     app.add_handler(CommandHandler("primelate", primelate))
     app.add_handler(CommandHandler("midshiftlate", midshiftlate))
     app.add_handler(CommandHandler("closinglate", closinglate))
     app.add_handler(CommandHandler("late", late))
 
+    # reset
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("resetprime", resetprime))
     app.add_handler(CommandHandler("resetmidshift", resetmidshift))
     app.add_handler(CommandHandler("resetclosing", resetclosing))
     app.add_handler(CommandHandler("rest", rest))
 
+    # cover clock-ins
     app.add_handler(CommandHandler("clockinprimecover", lambda u, c: cover_clockin(u, c, "prime")))
     app.add_handler(CommandHandler("clockinmidshiftcover", lambda u, c: cover_clockin(u, c, "midshift")))
     app.add_handler(CommandHandler("clockinclosingcover", lambda u, c: cover_clockin(u, c, "closing")))
 
+    # clock-in messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Run guard every 60 seconds to trigger reset at 6:00 AM PH
+    # run guard every 60 seconds to trigger reset at 6:00 AM PH
     app.job_queue.run_repeating(
         auto_reset_guard,
         interval=60,
@@ -541,8 +631,9 @@ def main():
         name="auto_reset_guard",
     )
 
-    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + AUTO RESET @ 6AM PH)")
+    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + MISSING #TAGS + AUTO RESET @ 6AM PH)")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
