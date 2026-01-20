@@ -5,7 +5,7 @@ from datetime import datetime, timezone, time, timedelta, date
 from zoneinfo import ZoneInfo
 from typing import Optional
 
-from telegram import Update
+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -581,3 +581,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
