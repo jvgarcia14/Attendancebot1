@@ -3,7 +3,7 @@ import os
 import difflib
 from datetime import datetime, timezone, time, timedelta, date
 from zoneinfo import ZoneInfo
-from typing import Optional
+from typing import Optional, List, Tuple
 
 from telegram import Update
 from telegram.ext import (
@@ -26,6 +26,9 @@ BOT_START_TIME = datetime.now(timezone.utc)
 
 # ---------------- DAY RESET TIME (PH) ----------------
 RESET_TIME_PH = time(6, 0)  # 6:00 AM PH
+
+# ---------------- TABLE PAGINATION ----------------
+PAGE_SIZE = 12  # /prime shows page 1 of 12 rows
 
 # ---------------- OPTIONAL DB (POSTGRES) ----------------
 DB_ENABLED = False
@@ -69,6 +72,33 @@ def attendance_day_for(ph_dt: datetime) -> date:
 def suggest_page(input_key: str):
     matches = difflib.get_close_matches(input_key, EXPECTED_PAGES.keys(), n=1, cutoff=0.7)
     return matches[0] if matches else None
+
+
+def clamp(n: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, n))
+
+
+def split_for_telegram(text: str, max_len: int = 3900) -> List[str]:
+    """
+    Split long text into Telegram-safe chunks (keeps lines intact).
+    """
+    if len(text) <= max_len:
+        return [text]
+
+    parts = []
+    while len(text) > max_len:
+        cut = text.rfind("\n", 0, max_len)
+        if cut == -1:
+            cut = max_len
+        parts.append(text[:cut])
+        text = text[cut:].lstrip("\n")
+    parts.append(text)
+    return parts
+
+
+async def send_long(update: Update, text: str, parse_mode: str = "Markdown"):
+    for part in split_for_telegram(text):
+        await update.message.reply_text(part, parse_mode=parse_mode)
 
 
 # ---------------- SHIFTS ----------------
@@ -302,12 +332,12 @@ def parse_clock_in(text: str):
     return True, page_key, shift
 
 
-# ---------------- TABLE VIEW (WITH #TAG FOR MISSING) ----------------
-def generate_shift_table(shift: str, limit=12, missing_only=False):
-    """
-    Table shows #tag column. For missing pages, #tag helps coaches copy/paste.
-    """
-    rows = []
+# ---------------- TABLE BUILDING ----------------
+Row = Tuple[str, str, int, int, str]  # (tag, label, users, covers, status)
+
+
+def build_shift_rows(shift: str, missing_only: bool = False) -> List[Row]:
+    rows: List[Row] = []
     for key, label in EXPECTED_PAGES.items():
         users = clock_ins[shift].get(key, {}).get("users", {})
         covers = clock_ins[shift].get(key, {}).get("covers", {})
@@ -315,23 +345,27 @@ def generate_shift_table(shift: str, limit=12, missing_only=False):
         u = len(users)
         c = len(covers)
         missing = (u == 0 and c == 0)
-
         if missing_only and not missing:
             continue
 
-        # show ✅/❌
         status = "✅" if not missing else "❌"
         tag = f"#{key}"
-
         rows.append((tag, label, u, c, status))
+    return rows
 
+
+def render_shift_table(rows: List[Row], title: str, page: int, page_size: int) -> str:
     total = len(rows)
-    shown = rows[:limit]
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = clamp(page, 1, total_pages)
 
-    title = f"{shift.upper()} SHIFT — MISSING PAGES" if missing_only else f"{shift.upper()} SHIFT — CLOCK-IN STATUS"
+    start = (page - 1) * page_size
+    end = min(start + page_size, total)
+    shown = rows[start:end]
 
     msg = (
-        f"📊 *{title}*\n\n"
+        f"📊 *{title}*\n"
+        f"_Page {page}/{total_pages} • Rows {start+1}-{end} of {total}_\n\n"
         "```\n"
         "Tag              | Page                     | 👥 | 🟡 | St\n"
         "-----------------+--------------------------+----+----+---\n"
@@ -343,17 +377,13 @@ def generate_shift_table(shift: str, limit=12, missing_only=False):
         msg += f"{tag_col:<15} | {page_col:<24} | {u:^2} | {c:^2} | {s}\n"
 
     msg += "```\n"
-
-    if total > limit:
-        msg += f"_Showing {limit} of {total} pages_"
-    elif total == 0:
-        msg += "_None_"
-
     return msg
 
 
-def generate_shift_table_full(shift: str, missing_only=False):
-    return generate_shift_table(shift, limit=999, missing_only=missing_only)
+def generate_shift_table_page(shift: str, page: int = 1, page_size: int = PAGE_SIZE, missing_only: bool = False) -> str:
+    rows = build_shift_rows(shift, missing_only=missing_only)
+    title = f"{shift.upper()} SHIFT — MISSING PAGES" if missing_only else f"{shift.upper()} SHIFT — CLOCK-IN STATUS"
+    return render_shift_table(rows, title, page, page_size)
 
 
 # ---------------- CLOCK-IN MESSAGE ----------------
@@ -457,54 +487,59 @@ def generate_late_status(shift: str):
 
 # ---------------- COMMANDS ----------------
 async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table("prime"), parse_mode="Markdown")
-
+    await send_long(update, generate_shift_table_page("prime", page=1), parse_mode="Markdown")
 
 async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table("midshift"), parse_mode="Markdown")
-
+    await send_long(update, generate_shift_table_page("midshift", page=1), parse_mode="Markdown")
 
 async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table("closing"), parse_mode="Markdown")
+    await send_long(update, generate_shift_table_page("closing", page=1), parse_mode="Markdown")
 
 
-# FULL LIST
-async def primefull(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("prime"), parse_mode="Markdown")
+def _get_page_arg(context: ContextTypes.DEFAULT_TYPE) -> int:
+    # default page 1
+    if not context.args:
+        return 1
+    try:
+        return int(context.args[0])
+    except Exception:
+        return 1
 
 
-async def midshiftfull(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("midshift"), parse_mode="Markdown")
+async def primepage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("prime", page=p), parse_mode="Markdown")
+
+async def midshiftpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("midshift", page=p), parse_mode="Markdown")
+
+async def closingpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("closing", page=p), parse_mode="Markdown")
 
 
-async def closingfull(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("closing"), parse_mode="Markdown")
+async def primemissingpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("prime", page=p, missing_only=True), parse_mode="Markdown")
 
+async def midshiftmissingpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("midshift", page=p, missing_only=True), parse_mode="Markdown")
 
-# MISSING ONLY (WITH #TAG)
-async def primemissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("prime", missing_only=True), parse_mode="Markdown")
-
-
-async def midshiftmissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("midshift", missing_only=True), parse_mode="Markdown")
-
-
-async def closingmissing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_table_full("closing", missing_only=True), parse_mode="Markdown")
+async def closingmissingpage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = _get_page_arg(context)
+    await send_long(update, generate_shift_table_page("closing", page=p, missing_only=True), parse_mode="Markdown")
 
 
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
-
+    await send_long(update, generate_late_status("prime"), parse_mode="Markdown")
 
 async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_late_status("midshift"), parse_mode="Markdown")
-
+    await send_long(update, generate_late_status("midshift"), parse_mode="Markdown")
 
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
-
+    await send_long(update, generate_late_status("closing"), parse_mode="Markdown")
 
 async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
@@ -514,7 +549,7 @@ async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + "\n\n"
         + generate_late_status("closing")
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await send_long(update, msg, parse_mode="Markdown")
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -523,13 +558,11 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY)
     await update.message.reply_text("♻️ All shifts reset.")
 
-
 async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["prime"].clear()
     db_delete_day(ACTIVE_DAY, "prime")
     await update.message.reply_text("♻️ Prime reset.")
-
 
 async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -537,13 +570,11 @@ async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "midshift")
     await update.message.reply_text("♻️ Midshift reset.")
 
-
 async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["closing"].clear()
     db_delete_day(ACTIVE_DAY, "closing")
     await update.message.reply_text("♻️ Closing reset.")
-
 
 async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reset(update, context)
@@ -551,7 +582,6 @@ async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- AUTO RESET (SAFE ON ANY PTB) ----------------
 _last_reset_day = None
-
 
 async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
     """
@@ -587,20 +617,20 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # status tables
+    # preview (page 1)
     app.add_handler(CommandHandler("prime", prime))
     app.add_handler(CommandHandler("midshift", midshift))
     app.add_handler(CommandHandler("closing", closing))
 
-    # full tables
-    app.add_handler(CommandHandler("primefull", primefull))
-    app.add_handler(CommandHandler("midshiftfull", midshiftfull))
-    app.add_handler(CommandHandler("closingfull", closingfull))
+    # pagination commands
+    app.add_handler(CommandHandler("primepage", primepage))
+    app.add_handler(CommandHandler("midshiftpage", midshiftpage))
+    app.add_handler(CommandHandler("closingpage", closingpage))
 
-    # missing-only (with #tag)
-    app.add_handler(CommandHandler("primemissing", primemissing))
-    app.add_handler(CommandHandler("midshiftmissing", midshiftmissing))
-    app.add_handler(CommandHandler("closingmissing", closingmissing))
+    # missing-only pagination (with #tag)
+    app.add_handler(CommandHandler("primemissingpage", primemissingpage))
+    app.add_handler(CommandHandler("midshiftmissingpage", midshiftmissingpage))
+    app.add_handler(CommandHandler("closingmissingpage", closingmissingpage))
 
     # late
     app.add_handler(CommandHandler("primelate", primelate))
@@ -631,7 +661,7 @@ def main():
         name="auto_reset_guard",
     )
 
-    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + MISSING #TAGS + AUTO RESET @ 6AM PH)")
+    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + #TAGS + PAGINATION + AUTO RESET @ 6AM PH)")
     app.run_polling()
 
 
