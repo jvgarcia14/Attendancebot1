@@ -1,8 +1,10 @@
 import logging
 import os
 import difflib
-from datetime import datetime, timezone, time
+from datetime import datetime, timezone, time, timedelta, date
 from zoneinfo import ZoneInfo
+from typing import Optional
+
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,12 +16,25 @@ from telegram.ext import (
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ---------------- TIMEZONE ----------------
 PH_TZ = ZoneInfo("Asia/Manila")
 
 # ---------------- BOT START TIME ----------------
 BOT_START_TIME = datetime.now(timezone.utc)
+
+# ---------------- DAY RESET TIME (PH) ----------------
+RESET_TIME_PH = time(6, 0)  # 6:00 AM PH
+
+# ---------------- OPTIONAL DB (POSTGRES) ----------------
+DB_ENABLED = False
+conn = None
+try:
+    import psycopg2  # pip install psycopg2-binary
+except Exception:
+    psycopg2 = None
+
 
 # ---------------- HELPERS ----------------
 def normalize_tag(tag: str) -> str:
@@ -32,14 +47,29 @@ def normalize_tag(tag: str) -> str:
         .replace("x", "")
     )
 
+
 def to_ph_time(dt: datetime) -> datetime:
     return dt.astimezone(PH_TZ)
 
+
+def ph_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(PH_TZ)
+
+
+def attendance_day_for(ph_dt: datetime) -> date:
+    """
+    Attendance "day" starts at 6:00 AM PH time.
+    If time is before 6AM, it belongs to the previous calendar date.
+    """
+    if ph_dt.time() < RESET_TIME_PH:
+        return ph_dt.date() - timedelta(days=1)
+    return ph_dt.date()
+
+
 def suggest_page(input_key: str):
-    matches = difflib.get_close_matches(
-        input_key, EXPECTED_PAGES.keys(), n=1, cutoff=0.7
-    )
+    matches = difflib.get_close_matches(input_key, EXPECTED_PAGES.keys(), n=1, cutoff=0.7)
     return matches[0] if matches else None
+
 
 # ---------------- SHIFTS ----------------
 SHIFT_TAGS = {
@@ -135,19 +165,125 @@ RAW_PAGES = {
 
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
-# ---------------- STORAGE ----------------
+# ---------------- STORAGE (IN-MEMORY CACHE) ----------------
 clock_ins = {
     "prime": {},
     "midshift": {},
     "closing": {},
 }
 
+ACTIVE_DAY: date = attendance_day_for(ph_now())
+
+
 def init_page(shift, page_key):
     if page_key not in clock_ins[shift]:
-        clock_ins[shift][page_key] = {
-            "users": {},
-            "covers": {},
-        }
+        clock_ins[shift][page_key] = {"users": {}, "covers": {}}
+
+
+def clear_all_shifts():
+    for s in clock_ins:
+        clock_ins[s].clear()
+
+
+# ---------------- DB SETUP ----------------
+def db_init():
+    global DB_ENABLED, conn
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        logger.warning("DATABASE_URL not set -> running WITHOUT persistence (data will reset on restart).")
+        DB_ENABLED = False
+        return
+
+    if psycopg2 is None:
+        logger.warning("psycopg2 not installed -> running WITHOUT persistence.")
+        DB_ENABLED = False
+        return
+
+    conn = psycopg2.connect(db_url, sslmode="require")
+    conn.autocommit = True
+    DB_ENABLED = True
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+        CREATE TABLE IF NOT EXISTS attendance_clockins (
+            attendance_day DATE NOT NULL,
+            shift TEXT NOT NULL,
+            page_key TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            is_cover BOOLEAN NOT NULL DEFAULT FALSE,
+            ph_ts TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (attendance_day, shift, page_key, user_name, is_cover)
+        );
+        """
+        )
+
+
+def db_upsert(att_day: date, shift: str, page_key: str, user_name: str, is_cover: bool, ph_ts: datetime):
+    if not DB_ENABLED:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+        INSERT INTO attendance_clockins (attendance_day, shift, page_key, user_name, is_cover, ph_ts)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (attendance_day, shift, page_key, user_name, is_cover)
+        DO UPDATE SET ph_ts = EXCLUDED.ph_ts;
+        """,
+            (att_day, shift, page_key, user_name, is_cover, ph_ts),
+        )
+
+
+def db_delete_day(att_day: date, shift: Optional[str] = None):
+    if not DB_ENABLED:
+        return
+    with conn.cursor() as cur:
+        if shift:
+            cur.execute(
+                "DELETE FROM attendance_clockins WHERE attendance_day=%s AND shift=%s;",
+                (att_day, shift),
+            )
+        else:
+            cur.execute(
+                "DELETE FROM attendance_clockins WHERE attendance_day=%s;",
+                (att_day,),
+            )
+
+
+def db_load_day(att_day: date):
+    """
+    Load today's clock-ins from DB back into memory
+    so redeploy/edit won't wipe state.
+    """
+    if not DB_ENABLED:
+        return
+
+    clear_all_shifts()
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+        SELECT shift, page_key, user_name, is_cover, ph_ts
+        FROM attendance_clockins
+        WHERE attendance_day = %s;
+        """,
+            (att_day,),
+        )
+        rows = cur.fetchall()
+
+    for shift, page_key, user_name, is_cover, ph_ts in rows:
+        if shift not in clock_ins:
+            continue
+        if page_key not in EXPECTED_PAGES:
+            continue
+
+        init_page(shift, page_key)
+        ph_dt = ph_ts.astimezone(PH_TZ)
+        if is_cover:
+            clock_ins[shift][page_key]["covers"][user_name] = ph_dt
+        else:
+            clock_ins[shift][page_key]["users"][user_name] = ph_dt
+
 
 # ---------------- PARSER ----------------
 def parse_clock_in(text: str):
@@ -168,8 +304,47 @@ def parse_clock_in(text: str):
         return False, "", ""
     return True, page_key, shift
 
+
+# ---------------- TABLE VIEW (VISUAL FIRST) ----------------
+def generate_shift_table(shift: str, limit=12):
+    rows = []
+
+    for key, label in EXPECTED_PAGES.items():
+        users = clock_ins[shift].get(key, {}).get("users", {})
+        covers = clock_ins[shift].get(key, {}).get("covers", {})
+
+        u = len(users)
+        c = len(covers)
+        status = "✅" if u or c else "❌"
+
+        rows.append((label, u, c, status))
+
+    total = len(rows)
+    shown = rows[:limit]
+
+    msg = (
+        f"📊 *{shift.upper()} SHIFT — CLOCK-IN STATUS*\n\n"
+        "```\n"
+        "Page                     | 👥 | 🟡 | Status\n"
+        "-------------------------+----+----+--------\n"
+    )
+
+    for label, u, c, s in shown:
+        page = label[:25]
+        msg += f"{page:<25} | {u:^2} | {c:^2} |  {s}\n"
+
+    msg += "```\n"
+
+    if total > limit:
+        msg += f"_Showing {limit} of {total} pages_"
+
+    return msg
+
+
 # ---------------- CLOCK-IN MESSAGE ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ACTIVE_DAY
+
     if not update.message or not update.message.text:
         return
     if update.message.date < BOT_START_TIME:
@@ -186,16 +361,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if page_key not in EXPECTED_PAGES:
         suggestion = suggest_page(page_key)
         if suggestion:
-            await update.message.reply_text(
-                f"❗ Page not recognized.\nDid you mean: #{suggestion}"
-            )
+            await update.message.reply_text(f"❗ Page not recognized.\nDid you mean: #{suggestion}")
         return
 
     user = update.message.from_user.full_name
     ph_time = to_ph_time(update.message.date)
 
+    # Determine attendance day (6AM PH boundary)
+    att_day = attendance_day_for(ph_time)
+
+    # If day changed (bot ran overnight), switch view automatically
+    if att_day != ACTIVE_DAY:
+        ACTIVE_DAY = att_day
+        db_load_day(ACTIVE_DAY)
+
     init_page(shift, page_key)
     clock_ins[shift][page_key]["users"][user] = ph_time
+
+    # Persist
+    db_upsert(ACTIVE_DAY, shift, page_key, user, False, ph_time)
 
     await update.message.reply_text(
         f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\n"
@@ -203,9 +387,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
+
 # ---------------- COVER CLOCK-IN ----------------
 async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shift: str):
-    if update.message.date < BOT_START_TIME or not context.args:
+    global ACTIVE_DAY
+
+    if not update.message or update.message.date < BOT_START_TIME or not context.args:
         return
 
     page_key = normalize_tag(context.args[0])
@@ -215,8 +402,16 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
     user = update.message.from_user.full_name
     ph_time = to_ph_time(update.message.date)
 
+    att_day = attendance_day_for(ph_time)
+    if att_day != ACTIVE_DAY:
+        ACTIVE_DAY = att_day
+        db_load_day(ACTIVE_DAY)
+
     init_page(shift, page_key)
     clock_ins[shift][page_key]["covers"][user] = ph_time
+
+    # Persist
+    db_upsert(ACTIVE_DAY, shift, page_key, user, True, ph_time)
 
     await update.message.reply_text(
         f"🟡 *{EXPECTED_PAGES[page_key]}* COVER ({shift})\n"
@@ -224,45 +419,8 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
         parse_mode="Markdown",
     )
 
-# ---------------- STATUS GENERATORS ----------------
-def generate_shift_status(shift: str, with_names=False):
-    clocked = []
-    missing = []
 
-    for key, label in EXPECTED_PAGES.items():
-        if key in clock_ins[shift]:
-            users = clock_ins[shift][key]["users"]
-            covers = clock_ins[shift][key]["covers"]
-
-            parts = []
-            if users:
-                parts.append(f"{len(users)} chatter{'s' if len(users) != 1 else ''}")
-            if covers:
-                parts.append(f"{len(covers)} cover{'s' if len(covers) != 1 else ''}")
-
-            header = f"{label} ({', '.join(parts)})" if parts else f"{label} (cover)"
-
-            block = header
-            if with_names:
-                for u in users:
-                    block += f"\n- {u}"
-                for c in covers:
-                    block += f"\n- {c} (cover)"
-
-            clocked.append(block)
-        else:
-            missing.append(label)
-
-    msg = f"📋 *{shift.upper()} SHIFT CLOCK-IN STATUS:*\n\n"
-
-    msg += "✅ *Clocked in:*\n"
-    msg += "\n\n".join(clocked) if clocked else "None"
-
-    msg += "\n\n🚫 *No Clock In:*\n"
-    msg += "\n".join(missing) if missing else "None"
-
-    return msg
-
+# ---------------- LATE STATUS ----------------
 def generate_late_status(shift: str):
     cutoff = SHIFT_CUTOFFS[shift]
     blocks = []
@@ -286,74 +444,111 @@ def generate_late_status(shift: str):
         return f"⏰ *{shift.upper()} LATE*\n\nNo late clock-ins 🎉"
     return f"⏰ *{shift.upper()} LATE*\n\n" + "\n\n".join(blocks)
 
+
 # ---------------- COMMANDS ----------------
 async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("prime"), parse_mode="Markdown")
+    await update.message.reply_text(generate_shift_table("prime"), parse_mode="Markdown")
+
 
 async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("midshift"), parse_mode="Markdown")
+    await update.message.reply_text(generate_shift_table("midshift"), parse_mode="Markdown")
+
 
 async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("closing"), parse_mode="Markdown")
+    await update.message.reply_text(generate_shift_table("closing"), parse_mode="Markdown")
 
-async def nameprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("prime", True), parse_mode="Markdown")
-
-async def namemidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("midshift", True), parse_mode="Markdown")
-
-async def nameclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(generate_shift_status("closing", True), parse_mode="Markdown")
 
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
 
+
 async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("midshift"), parse_mode="Markdown")
+
 
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
 
+
 async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        generate_late_status("prime") + "\n\n" +
-        generate_late_status("midshift") + "\n\n" +
-        generate_late_status("closing")
+        generate_late_status("prime")
+        + "\n\n"
+        + generate_late_status("midshift")
+        + "\n\n"
+        + generate_late_status("closing")
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for s in clock_ins:
-        clock_ins[s].clear()
+    global ACTIVE_DAY
+    clear_all_shifts()
+    db_delete_day(ACTIVE_DAY)
     await update.message.reply_text("♻️ All shifts reset.")
 
+
 async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ACTIVE_DAY
     clock_ins["prime"].clear()
+    db_delete_day(ACTIVE_DAY, "prime")
     await update.message.reply_text("♻️ Prime reset.")
 
+
 async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ACTIVE_DAY
     clock_ins["midshift"].clear()
+    db_delete_day(ACTIVE_DAY, "midshift")
     await update.message.reply_text("♻️ Midshift reset.")
 
+
 async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global ACTIVE_DAY
     clock_ins["closing"].clear()
+    db_delete_day(ACTIVE_DAY, "closing")
     await update.message.reply_text("♻️ Closing reset.")
+
 
 async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reset(update, context)
 
+
+# ---------------- AUTO RESET JOB (6AM PH) ----------------
+async def auto_reset_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Runs every day at 6:00 AM PH time.
+    Switches to the new attendance day and clears in-memory cache.
+    DB history stays.
+    """
+    global ACTIVE_DAY
+    now_ph = ph_now()
+    ACTIVE_DAY = attendance_day_for(now_ph)
+
+    clear_all_shifts()
+    db_load_day(ACTIVE_DAY)
+
+    logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
+
+
 # ---------------- MAIN ----------------
 def main():
+    global ACTIVE_DAY
+
     TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        raise RuntimeError("BOT_TOKEN not set")
+
+    db_init()
+
+    # Set ACTIVE_DAY + load today's records (if DB enabled)
+    ACTIVE_DAY = attendance_day_for(ph_now())
+    db_load_day(ACTIVE_DAY)
+
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("prime", prime))
     app.add_handler(CommandHandler("midshift", midshift))
     app.add_handler(CommandHandler("closing", closing))
-
-    app.add_handler(CommandHandler("nameprime", nameprime))
-    app.add_handler(CommandHandler("namemidshift", namemidshift))
-    app.add_handler(CommandHandler("nameclosing", nameclosing))
 
     app.add_handler(CommandHandler("primelate", primelate))
     app.add_handler(CommandHandler("midshiftlate", midshiftlate))
@@ -372,11 +567,17 @@ def main():
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Attendance bot running (FINAL FIXED VERSION)")
+    # Schedule daily reset at 6:00 AM PH time
+    app.job_queue.run_daily(
+        auto_reset_job,
+        time=RESET_TIME_PH,
+        timezone=PH_TZ,
+        name="auto_reset_6am_ph",
+    )
+
+    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + AUTO RESET @ 6AM PH)")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
-
-
-
