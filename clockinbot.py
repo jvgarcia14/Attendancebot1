@@ -35,7 +35,6 @@ try:
 except Exception:
     psycopg2 = None
 
-
 # ---------------- HELPERS ----------------
 def normalize_tag(tag: str) -> str:
     return (
@@ -47,14 +46,11 @@ def normalize_tag(tag: str) -> str:
         .replace("x", "")
     )
 
-
 def to_ph_time(dt: datetime) -> datetime:
     return dt.astimezone(PH_TZ)
 
-
 def ph_now() -> datetime:
     return datetime.now(timezone.utc).astimezone(PH_TZ)
-
 
 def attendance_day_for(ph_dt: datetime) -> date:
     """
@@ -65,11 +61,9 @@ def attendance_day_for(ph_dt: datetime) -> date:
         return ph_dt.date() - timedelta(days=1)
     return ph_dt.date()
 
-
 def suggest_page(input_key: str):
     matches = difflib.get_close_matches(input_key, EXPECTED_PAGES.keys(), n=1, cutoff=0.7)
     return matches[0] if matches else None
-
 
 # ---------------- SHIFTS ----------------
 SHIFT_TAGS = {
@@ -174,16 +168,13 @@ clock_ins = {
 
 ACTIVE_DAY: date = attendance_day_for(ph_now())
 
-
 def init_page(shift, page_key):
     if page_key not in clock_ins[shift]:
         clock_ins[shift][page_key] = {"users": {}, "covers": {}}
 
-
 def clear_all_shifts():
     for s in clock_ins:
         clock_ins[s].clear()
-
 
 # ---------------- DB SETUP ----------------
 def db_init():
@@ -218,7 +209,6 @@ def db_init():
         """
         )
 
-
 def db_upsert(att_day: date, shift: str, page_key: str, user_name: str, is_cover: bool, ph_ts: datetime):
     if not DB_ENABLED:
         return
@@ -232,7 +222,6 @@ def db_upsert(att_day: date, shift: str, page_key: str, user_name: str, is_cover
         """,
             (att_day, shift, page_key, user_name, is_cover, ph_ts),
         )
-
 
 def db_delete_day(att_day: date, shift: Optional[str] = None):
     if not DB_ENABLED:
@@ -248,7 +237,6 @@ def db_delete_day(att_day: date, shift: Optional[str] = None):
                 "DELETE FROM attendance_clockins WHERE attendance_day=%s;",
                 (att_day,),
             )
-
 
 def db_load_day(att_day: date):
     """
@@ -284,7 +272,6 @@ def db_load_day(att_day: date):
         else:
             clock_ins[shift][page_key]["users"][user_name] = ph_dt
 
-
 # ---------------- PARSER ----------------
 def parse_clock_in(text: str):
     lines = [l.strip() for l in text.split("\n") if l.strip()]
@@ -304,11 +291,9 @@ def parse_clock_in(text: str):
         return False, "", ""
     return True, page_key, shift
 
-
 # ---------------- TABLE VIEW (VISUAL FIRST) ----------------
 def generate_shift_table(shift: str, limit=12):
     rows = []
-
     for key, label in EXPECTED_PAGES.items():
         users = clock_ins[shift].get(key, {}).get("users", {})
         covers = clock_ins[shift].get(key, {}).get("covers", {})
@@ -316,7 +301,6 @@ def generate_shift_table(shift: str, limit=12):
         u = len(users)
         c = len(covers)
         status = "✅" if u or c else "❌"
-
         rows.append((label, u, c, status))
 
     total = len(rows)
@@ -339,7 +323,6 @@ def generate_shift_table(shift: str, limit=12):
         msg += f"_Showing {limit} of {total} pages_"
 
     return msg
-
 
 # ---------------- CLOCK-IN MESSAGE ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -367,10 +350,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user.full_name
     ph_time = to_ph_time(update.message.date)
 
-    # Determine attendance day (6AM PH boundary)
     att_day = attendance_day_for(ph_time)
-
-    # If day changed (bot ran overnight), switch view automatically
     if att_day != ACTIVE_DAY:
         ACTIVE_DAY = att_day
         db_load_day(ACTIVE_DAY)
@@ -378,7 +358,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     init_page(shift, page_key)
     clock_ins[shift][page_key]["users"][user] = ph_time
 
-    # Persist
     db_upsert(ACTIVE_DAY, shift, page_key, user, False, ph_time)
 
     await update.message.reply_text(
@@ -386,7 +365,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{ph_time.strftime('%I:%M %p')} PH\nby {user}",
         parse_mode="Markdown",
     )
-
 
 # ---------------- COVER CLOCK-IN ----------------
 async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shift: str):
@@ -410,7 +388,6 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
     init_page(shift, page_key)
     clock_ins[shift][page_key]["covers"][user] = ph_time
 
-    # Persist
     db_upsert(ACTIVE_DAY, shift, page_key, user, True, ph_time)
 
     await update.message.reply_text(
@@ -418,7 +395,6 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
         f"{ph_time.strftime('%I:%M %p')} PH\nby {user}",
         parse_mode="Markdown",
     )
-
 
 # ---------------- LATE STATUS ----------------
 def generate_late_status(shift: str):
@@ -444,31 +420,24 @@ def generate_late_status(shift: str):
         return f"⏰ *{shift.upper()} LATE*\n\nNo late clock-ins 🎉"
     return f"⏰ *{shift.upper()} LATE*\n\n" + "\n\n".join(blocks)
 
-
 # ---------------- COMMANDS ----------------
 async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("prime"), parse_mode="Markdown")
 
-
 async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("midshift"), parse_mode="Markdown")
-
 
 async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_shift_table("closing"), parse_mode="Markdown")
 
-
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("prime"), parse_mode="Markdown")
-
 
 async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("midshift"), parse_mode="Markdown")
 
-
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_late_status("closing"), parse_mode="Markdown")
-
 
 async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
@@ -480,13 +449,11 @@ async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clear_all_shifts()
     db_delete_day(ACTIVE_DAY)
     await update.message.reply_text("♻️ All shifts reset.")
-
 
 async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -494,13 +461,11 @@ async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "prime")
     await update.message.reply_text("♻️ Prime reset.")
 
-
 async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["midshift"].clear()
     db_delete_day(ACTIVE_DAY, "midshift")
     await update.message.reply_text("♻️ Midshift reset.")
-
 
 async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -508,27 +473,29 @@ async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "closing")
     await update.message.reply_text("♻️ Closing reset.")
 
-
 async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reset(update, context)
 
+# ---------------- AUTO RESET (SAFE ON ANY PTB) ----------------
+_last_reset_day = None
 
-# ---------------- AUTO RESET JOB (6AM PH) ----------------
-async def auto_reset_job(context: ContextTypes.DEFAULT_TYPE):
+async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
     """
-    Runs every day at 6:00 AM PH time.
-    Switches to the new attendance day and clears in-memory cache.
-    DB history stays.
+    Runs every minute. When PH time hits 6:00 AM, it resets once.
+    This avoids JobQueue timezone argument issues across PTB versions.
     """
-    global ACTIVE_DAY
+    global _last_reset_day, ACTIVE_DAY
+
     now_ph = ph_now()
-    ACTIVE_DAY = attendance_day_for(now_ph)
+    today_att_day = attendance_day_for(now_ph)
 
-    clear_all_shifts()
-    db_load_day(ACTIVE_DAY)
-
-    logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
-
+    if now_ph.hour == 6 and now_ph.minute == 0:
+        if _last_reset_day != today_att_day:
+            _last_reset_day = today_att_day
+            ACTIVE_DAY = today_att_day
+            clear_all_shifts()
+            db_load_day(ACTIVE_DAY)
+            logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
 
 # ---------------- MAIN ----------------
 def main():
@@ -540,7 +507,6 @@ def main():
 
     db_init()
 
-    # Set ACTIVE_DAY + load today's records (if DB enabled)
     ACTIVE_DAY = attendance_day_for(ph_now())
     db_load_day(ACTIVE_DAY)
 
@@ -567,20 +533,16 @@ def main():
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Schedule daily reset at 6:00 AM PH time
-    app.job_queue.run_daily(
-        auto_reset_job,
-        time=RESET_TIME_PH,
-        tzinfo=PH_TZ,
-        name="auto_reset_6am_ph",
+    # Run guard every 60 seconds to trigger reset at 6:00 AM PH
+    app.job_queue.run_repeating(
+        auto_reset_guard,
+        interval=60,
+        first=5,
+        name="auto_reset_guard",
     )
 
     print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + AUTO RESET @ 6AM PH)")
     app.run_polling()
 
-
 if __name__ == "__main__":
     main()
-
-
-
