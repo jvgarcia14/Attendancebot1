@@ -87,6 +87,7 @@ RAW_PAGES = {
     "dandpaid": "Dan D Paid",
     "dandwelcome": "Dan D Welcome",
     "emilyraypaidfree": "Emily Ray Paid / Free",
+    "emilyray": "Emily Ray",
     "essiepaidfree": "Essie Paid / Free",
     "fanslyteam1": "Fansly Team1",
     "fanslyteam2": "Fansly Team2",
@@ -376,5 +377,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
