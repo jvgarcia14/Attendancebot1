@@ -571,7 +571,7 @@ def main():
     app.job_queue.run_daily(
         auto_reset_job,
         time=RESET_TIME_PH,
-        timezone=PH_TZ,
+        tzinfo=PH_TZ,
         name="auto_reset_6am_ph",
     )
 
@@ -581,5 +581,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
