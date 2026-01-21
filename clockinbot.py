@@ -114,6 +114,7 @@ RAW_PAGES = {
     "alannafreeoftv": "Alanna Free / OFTV",
     "alannapaid": "Alanna Paid",
     "alannawelcome": "Alanna Welcome",
+    "alexalana": "Alexa Lana",
     "alexis": "Alexis",
     "allyfree": "Ally Free",
     "allypaid": "Ally Paid",
@@ -588,6 +589,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
