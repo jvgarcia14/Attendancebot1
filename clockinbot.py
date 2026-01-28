@@ -28,8 +28,6 @@ BOT_START_TIME = datetime.now(timezone.utc)
 RESET_TIME_PH = time(6, 0)  # 6:00 AM PH
 
 # ---------------- TABLE CHUNKING ----------------
-# Increase this if you want fewer messages; decrease if Telegram complains.
-# 20-25 is usually safe for wide monospace tables.
 ROWS_PER_MESSAGE = 40
 
 # ---------------- OPTIONAL DB (POSTGRES) ----------------
@@ -85,7 +83,6 @@ async def safe_reply(update: Update, text: str, parse_mode: str = "Markdown"):
         await update.message.reply_text(text, parse_mode=parse_mode)
         return
 
-    # split on line breaks
     while text:
         chunk = text[:MAX]
         cut = chunk.rfind("\n")
@@ -303,22 +300,34 @@ def db_load_day(att_day: date):
 
 # ---------------- PARSER ----------------
 def parse_clock_in(text: str):
+    """
+    Supports:
+      CLOCK IN
+      #clockinclosing
+      #islafree
+      #cover   (optional)
+    """
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     if not any(l.upper() == "CLOCK IN" for l in lines):
-        return False, "", ""
+        return False, "", "", False
 
     page_key, shift = "", ""
+    is_cover = False
+
     for l in lines:
         if l.startswith("#"):
             tag = normalize_tag(l[1:])
-            if tag in SHIFT_TAGS:
+
+            if tag == "cover":
+                is_cover = True
+            elif tag in SHIFT_TAGS:
                 shift = SHIFT_TAGS[tag]
             else:
                 page_key = tag
 
     if not page_key or not shift:
-        return False, "", ""
-    return True, page_key, shift
+        return False, "", "", False
+    return True, page_key, shift, is_cover
 
 
 # ---------------- TABLE RENDER ----------------
@@ -380,7 +389,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not any(tag in text for tag in SHIFT_TAGS):
         return
 
-    valid, page_key, shift = parse_clock_in(update.message.text)
+    valid, page_key, shift, is_cover = parse_clock_in(update.message.text)
     if not valid:
         return
 
@@ -399,17 +408,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db_load_day(ACTIVE_DAY)
 
     init_page(shift, page_key)
-    clock_ins[shift][page_key]["users"][user] = ph_time
-    db_upsert(ACTIVE_DAY, shift, page_key, user, False, ph_time)
+
+    if is_cover:
+        clock_ins[shift][page_key]["covers"][user] = ph_time
+        db_upsert(ACTIVE_DAY, shift, page_key, user, True, ph_time)
+    else:
+        clock_ins[shift][page_key]["users"][user] = ph_time
+        db_upsert(ACTIVE_DAY, shift, page_key, user, False, ph_time)
+
+    emoji = "🟡" if is_cover else "✅"
+    status = "COVER" if is_cover else "clocked in"
 
     await update.message.reply_text(
-        f"✅ *{EXPECTED_PAGES[page_key]}* clocked in ({shift})\n"
+        f"{emoji} *{EXPECTED_PAGES[page_key]}* {status} ({shift})\n"
         f"{ph_time.strftime('%I:%M %p')} PH\nby {user}",
         parse_mode="Markdown",
     )
 
 
-# ---------------- COVER CLOCK-IN ----------------
+# ---------------- COVER CLOCK-IN (COMMANDS STILL WORK) ----------------
 async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shift: str):
     global ACTIVE_DAY
 
@@ -418,6 +435,9 @@ async def cover_clockin(update: Update, context: ContextTypes.DEFAULT_TYPE, shif
 
     page_key = normalize_tag(context.args[0])
     if page_key not in EXPECTED_PAGES:
+        suggestion = suggest_page(page_key)
+        if suggestion:
+            await update.message.reply_text(f"❗ Page not recognized.\nDid you mean: #{suggestion}")
         return
 
     user = update.message.from_user.full_name
@@ -468,24 +488,37 @@ def generate_late_status(shift: str):
 async def prime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_full_table(update, "prime")
 
+
 async def midshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_full_table(update, "midshift")
+
 
 async def closing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_full_table(update, "closing")
 
+
 async def primelate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, generate_late_status("prime"), parse_mode="Markdown")
+
 
 async def midshiftlate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, generate_late_status("midshift"), parse_mode="Markdown")
 
+
 async def closinglate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, generate_late_status("closing"), parse_mode="Markdown")
 
+
 async def late(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = generate_late_status("prime") + "\n\n" + generate_late_status("midshift") + "\n\n" + generate_late_status("closing")
+    msg = (
+        generate_late_status("prime")
+        + "\n\n"
+        + generate_late_status("midshift")
+        + "\n\n"
+        + generate_late_status("closing")
+    )
     await safe_reply(update, msg, parse_mode="Markdown")
+
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -493,11 +526,13 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY)
     await update.message.reply_text("♻️ All shifts reset.")
 
+
 async def resetprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["prime"].clear()
     db_delete_day(ACTIVE_DAY, "prime")
     await update.message.reply_text("♻️ Prime reset.")
+
 
 async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
@@ -505,11 +540,13 @@ async def resetmidshift(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_delete_day(ACTIVE_DAY, "midshift")
     await update.message.reply_text("♻️ Midshift reset.")
 
+
 async def resetclosing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global ACTIVE_DAY
     clock_ins["closing"].clear()
     db_delete_day(ACTIVE_DAY, "closing")
     await update.message.reply_text("♻️ Closing reset.")
+
 
 async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await reset(update, context)
@@ -517,6 +554,7 @@ async def rest(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- AUTO RESET (SAFE ON ANY PTB) ----------------
 _last_reset_day = None
+
 
 async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
     """
@@ -551,7 +589,7 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # status tables -> now sends full table in multiple chunks
+    # status tables
     app.add_handler(CommandHandler("prime", prime))
     app.add_handler(CommandHandler("midshift", midshift))
     app.add_handler(CommandHandler("closing", closing))
@@ -569,12 +607,12 @@ def main():
     app.add_handler(CommandHandler("resetclosing", resetclosing))
     app.add_handler(CommandHandler("rest", rest))
 
-    # cover clock-ins
+    # cover clock-ins (commands)
     app.add_handler(CommandHandler("clockinprimecover", lambda u, c: cover_clockin(u, c, "prime")))
     app.add_handler(CommandHandler("clockinmidshiftcover", lambda u, c: cover_clockin(u, c, "midshift")))
     app.add_handler(CommandHandler("clockinclosingcover", lambda u, c: cover_clockin(u, c, "closing")))
 
-    # clock-in messages
+    # clock-in messages (now supports #cover)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # run guard every 60 seconds to trigger reset at 6:00 AM PH
@@ -585,19 +623,9 @@ def main():
         name="auto_reset_guard",
     )
 
-    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + #TAGS + AUTO CHUNKED FULL TABLE + AUTO RESET @ 6AM PH)")
+    print("🤖 Attendance bot running (PERSISTENT + TABLE VIEW + #TAGS + #COVER SUPPORT + AUTO RESET @ 6AM PH)")
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
