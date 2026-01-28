@@ -162,6 +162,7 @@ RAW_PAGES = {
     "islaoftv": "Isla OFTV",
     "islapaid": "Isla Paid",
     "islawelcome": "Isla Welcome",
+    "islawhalecare": "Isla Whalecare",
     "kayleexjasmyn": "Kaylee X Jasmyn",
     "kissingcousinsxvalerievip": "Kissing Cousins X Valerie VIP",
     "lexipaid": "Lexi Paid",
@@ -590,6 +591,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
