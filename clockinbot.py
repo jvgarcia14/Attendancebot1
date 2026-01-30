@@ -182,6 +182,9 @@ RAW_PAGES = {
     "salah": "Salah",
     "sarahc": "Sarah C",
     "skypaidfree": "Sky Paid / Free",
+    "utahJazpaid": "UtahJaz Paid",
+    "utahJazfree": "UtahJaz Free",
+   
 }
 
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
@@ -625,4 +628,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
