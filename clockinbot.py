@@ -184,6 +184,7 @@ RAW_PAGES = {
     "skypaidfree": "Sky Paid / Free",
     "utahJazpaid": "UtahJaz Paid",
     "utahJazfree": "UtahJaz Free",
+    "utahJazwelcome": "UtahJaz Welcome",
    
 }
 
@@ -628,5 +629,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
