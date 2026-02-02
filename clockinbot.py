@@ -31,7 +31,7 @@ RESET_TIME_PH = time(6, 0)  # 6:00 AM PH
 ROWS_PER_MESSAGE = 40
 
 # ---------------- OPTIONAL DB (POSTGRES) ----------------
-DB_ENABLED = False
+DB_ENABLED = True
 conn = None
 try:
     import psycopg2  # pip install psycopg2-binary
@@ -640,6 +640,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
