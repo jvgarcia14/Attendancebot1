@@ -176,6 +176,7 @@ RAW_PAGES = {
     "livv": "Livv",
     "lily": "Lily",
     "lucy": "Lucy",
+    "juliavip": "Julia Vip",
     "madelynpaid": "Madelyn Paid",
     "madelynfree": "Madelyn Free",
     "madelynwelcome": "Madelyn Welcome",
@@ -646,6 +647,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
