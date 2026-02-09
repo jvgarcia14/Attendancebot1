@@ -132,6 +132,8 @@ RAW_PAGES = {
     "bronwinwelcome": "Bronwin Welcome",
     "camipaid": "Cami Paid",
     "camifree": "Cami Free",
+    "cat": "Cat",
+    "jane": "Jane",
     "carterpaidfree": "Carter Paid / Free",
     "christipaidfree": "Christi Paid and Free",
     "charlotteppaid": "Charlotte P Paid",
@@ -643,6 +645,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
