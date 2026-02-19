@@ -208,6 +208,49 @@ RAW_PAGES = {
    
 }
 
+# =============================
+# ✅ ADD: load pages from WEBSITE DB and merge
+# =============================
+def load_pages_from_website_db():
+    pages_url = os.getenv("WEBSITE_DATABASE_URL")
+    if not pages_url:
+        logger.warning("WEBSITE_DATABASE_URL not set. Using hardcoded pages only.")
+        return {}
+
+    if psycopg2 is None:
+        logger.warning("psycopg2 not installed -> cannot load website pages.")
+        return {}
+
+    try:
+        conn2 = psycopg2.connect(pages_url, sslmode="require", connect_timeout=5)
+        conn2.autocommit = True
+
+        with conn2.cursor() as cur:
+            cur.execute("""
+                SELECT tag, label
+                FROM pages
+                WHERE is_active = TRUE
+            """)
+            rows = cur.fetchall()
+
+        conn2.close()
+
+        out = {}
+        for tag, label in rows:
+            t = normalize_tag(str(tag))
+            if t:
+                out[t] = str(label)
+
+        logger.info(f"✅ Loaded {len(out)} pages from WEBSITE DB.")
+        return out
+
+    except Exception as e:
+        logger.warning(f"⚠️ Failed loading WEBSITE DB pages: {e}")
+        return {}
+
+# ✅ ADD: merge DB pages into EXPECTED_PAGES (DB wins if same tag)
+EXPECTED_PAGES.update(load_pages_from_website_db())
+
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
 # ---------------- STORAGE (IN-MEMORY CACHE) ----------------
@@ -649,6 +692,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
