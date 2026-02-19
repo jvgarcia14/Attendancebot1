@@ -637,7 +637,13 @@ async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
             clear_all_shifts()
             db_load_day(ACTIVE_DAY)
             logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
+async def refresh_pages_job(context: ContextTypes.DEFAULT_TYPE):
+    fresh = load_pages_from_website_db()
+    if fresh:
+        EXPECTED_PAGES.update(fresh)
 
+# in main(), after app is built:
+app.job_queue.run_repeating(refresh_pages_job, interval=300, first=10, name="refresh_pages")
 
 # ---------------- MAIN ----------------
 def main():
@@ -693,6 +699,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
