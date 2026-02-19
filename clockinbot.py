@@ -205,7 +205,6 @@ RAW_PAGES = {
     "utahJazpaid": "UtahJaz Paid",
     "utahJazfree": "UtahJaz Free",
     "utahJazwelcome": "UtahJaz Welcome",
-   
 }
 
 # =============================
@@ -226,11 +225,13 @@ def load_pages_from_website_db():
         conn2.autocommit = True
 
         with conn2.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT tag, label
                 FROM pages
                 WHERE is_active = TRUE
-            """)
+                """
+            )
             rows = cur.fetchall()
 
         conn2.close()
@@ -247,11 +248,21 @@ def load_pages_from_website_db():
     except Exception as e:
         logger.warning(f"⚠️ Failed loading WEBSITE DB pages: {e}")
         return {}
-        
+
+
+# ✅ build base pages
 EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
-# ✅ ADD: merge DB pages into EXPECTED_PAGES (DB wins if same tag)
+# ✅ merge DB pages into EXPECTED_PAGES (DB wins if same tag)
 EXPECTED_PAGES.update(load_pages_from_website_db())
+
+
+# ✅ ADD: periodic refresh job (so new tags work without restart)
+async def refresh_pages_job(context: ContextTypes.DEFAULT_TYPE):
+    fresh = load_pages_from_website_db()
+    if fresh:
+        EXPECTED_PAGES.update(fresh)
+        logger.info(f"🔁 Refreshed pages. Total tags now: {len(EXPECTED_PAGES)}")
 
 
 # ---------------- STORAGE (IN-MEMORY CACHE) ----------------
@@ -637,13 +648,7 @@ async def auto_reset_guard(context: ContextTypes.DEFAULT_TYPE):
             clear_all_shifts()
             db_load_day(ACTIVE_DAY)
             logger.info(f"Auto reset done. ACTIVE_DAY={ACTIVE_DAY.isoformat()}")
-async def refresh_pages_job(context: ContextTypes.DEFAULT_TYPE):
-    fresh = load_pages_from_website_db()
-    if fresh:
-        EXPECTED_PAGES.update(fresh)
 
-# in main(), after app is built:
-app.job_queue.run_repeating(refresh_pages_job, interval=300, first=10, name="refresh_pages")
 
 # ---------------- MAIN ----------------
 def main():
@@ -658,6 +663,15 @@ def main():
     db_load_day(ACTIVE_DAY)
 
     app = ApplicationBuilder().token(TOKEN).build()
+
+    # ✅ ADD: refresh allowed tags from WEBSITE DB every 5 minutes
+    # (IMPORTANT: this must be INSIDE main() so "app" exists)
+    app.job_queue.run_repeating(
+        refresh_pages_job,
+        interval=300,
+        first=10,
+        name="refresh_pages",
+    )
 
     # status tables
     app.add_handler(CommandHandler("prime", prime))
@@ -699,20 +713,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
