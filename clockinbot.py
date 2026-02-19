@@ -247,11 +247,12 @@ def load_pages_from_website_db():
     except Exception as e:
         logger.warning(f"⚠️ Failed loading WEBSITE DB pages: {e}")
         return {}
+        
+EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
 # ✅ ADD: merge DB pages into EXPECTED_PAGES (DB wins if same tag)
 EXPECTED_PAGES.update(load_pages_from_website_db())
 
-EXPECTED_PAGES = {normalize_tag(k): v for k, v in RAW_PAGES.items()}
 
 # ---------------- STORAGE (IN-MEMORY CACHE) ----------------
 clock_ins = {"prime": {}, "midshift": {}, "closing": {}}
@@ -692,6 +693,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
