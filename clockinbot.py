@@ -668,8 +668,8 @@ def main():
     # (IMPORTANT: this must be INSIDE main() so "app" exists)
     app.job_queue.run_repeating(
         refresh_pages_job,
-        interval=300,
-        first=10,
+        interval=15,
+        first=2,
         name="refresh_pages",
     )
 
@@ -713,3 +713,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
