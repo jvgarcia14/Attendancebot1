@@ -202,6 +202,9 @@ RAW_PAGES = {
     "salah": "Salah",
     "sarahc": "Sarah C",
     "skypaidfree": "Sky Paid / Free",
+    "jostasy": "Jostasy",
+    "dakota": "Dakota",
+    "sid": "Sid",
     "utahJazpaid": "UtahJaz Paid",
     "utahJazfree": "UtahJaz Free",
     "utahJazwelcome": "UtahJaz Welcome",
@@ -713,4 +716,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
