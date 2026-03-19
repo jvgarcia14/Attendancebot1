@@ -222,6 +222,8 @@ RAW_PAGES = {
     "hammypaid": "Hammy Paid",
     "hammyfree": "Hammy Free",
     "lyssa": "Lyssa",
+    "niohuru": "Niohuru",
+    "scarlettemoon": "Scarlettemoon",
 }
 
 # =============================
