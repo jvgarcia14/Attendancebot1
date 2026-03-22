@@ -224,7 +224,7 @@ RAW_PAGES = {
     "lyssa": "Lyssa",
     "niohuru": "Niohuru",
     "scarlettemoon": "Scarlettemoon",
-    "leah gotti": "Leah Gotti",
+    "leahgotti": "LeahGotti",
 }
 
 # =============================
